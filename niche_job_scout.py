@@ -70,7 +70,7 @@ def evaluate_job(title: str, summary: str) -> JobEvaluation:
     JOB DESCRIPTION: {summary[:3000]}
     """
     response = client.models.generate_content(
-        model="gemini-3.8-flash",,
+        model="gemini-3.8-flash",
         contents=prompt,
         config={
             "response_mime_type": "application/json",
