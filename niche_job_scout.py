@@ -1,5 +1,6 @@
 import os
 import json
+import urllib.parse
 import feedparser
 import requests
 from pydantic import BaseModel
@@ -30,17 +31,48 @@ Strict Dealbreakers (Automatically reject and score 1/10 if ANY apply):
 - Roles focused purely on character animation, game environments, or architectural visualization (ArchViz) with no product focus.
 """
 
-# --- 2. JOB SOURCES ---
-RSS_FEEDS = [
-    "https://weworkremotely.com/categories/remote-design-jobs.rss",
-    "https://remoteok.com/remote-3d-jobs.rss",
-    # PASTE YOUR TWO GOOGLE ALERTS RSS LINKS BELOW:
-    # "https://www.google.com/alerts/feeds/...",
-    # "https://www.google.com/alerts/feeds/...",
+# --- 2. DIRECT RSS FEEDS (REDDIT + REMOTE BOARDS) ---
+DIRECT_RSS_FEEDS = [
+    # Reddit Hiring Communities
+    "https://www.reddit.com/r/forhire/search.rss?q=%5Bhiring%5D+(3d+OR+product+OR+animation+OR+blender+OR+render)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/Freelance_forhire/search.rss?q=%5Bhiring%5D+(3d+OR+animation+OR+render+OR+product)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/3Dmodeling/search.rss?q=(hiring+OR+looking+for+OR+paid+OR+commission)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/blender/search.rss?q=(hiring+OR+paid+OR+commission+OR+product+animation)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/DesignJobs/search.rss?q=%5Bhiring%5D+(3d+OR+product+OR+animation+OR+mockup)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/HungryArtists/search.rss?q=%5Bhiring%5D+(3d+OR+product+OR+animation+OR+render)&restrict_sr=1&sort=new",
+    "https://www.reddit.com/r/MotionDesign/search.rss?q=(hiring+OR+freelance+OR+product+OR+3d)&restrict_sr=1&sort=new",
+
+    # Remote Job Boards
+    "https://remoteok.com/remote-jobs.rss?tags=3d,animation",
+    "https://www.workingnomads.com/jobs?category=design&format=rss",
+    "https://remotive.com/remote-jobs/design/feed",
 ]
+
+# --- 3. AUTOMATED SITE-WIDE SEARCHES (COVERS ALL MAJOR 3D, FREELANCE & STUDIO BOARDS) ---
+SEARCH_QUERIES = [
+    # Dedicated 3D & Creative Boards (ArtStation, Behance, Motionographer, 80 Level, CGTrader, Dribbble)
+    '(site:artstation.com/jobs OR site:behance.net/joblist OR site:motionographer.com/jobs OR site:80.lv/talent OR site:cgtrader.com OR site:dribbble.com/jobs) ("3d" OR "product animation" OR "product visualization" OR "lookdev") "remote"',
+
+    # Freelance Marketplaces (Upwork, Contra, PeoplePerHour, Freelancer)
+    '(site:upwork.com/freelance-jobs OR site:contra.com OR site:peopleperhour.com OR site:freelancer.com) ("3d product" OR "product animation" OR "3d packshot" OR "cgi ad" OR "product render")',
+
+    # Major Job Boards (LinkedIn, Wellfound, Indeed, JustRemote)
+    '(site:linkedin.com/jobs OR site:wellfound.com OR site:indeed.com OR site:justremote.co) ("3d product" OR "product visualization" OR "product animation" OR "3d generalist") "remote"',
+
+    # Studio & Brand Career Pages (Greenhouse, Lever, Ashby, Workable)
+    '(site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:apply.workable.com) ("3d artist" OR "product visualization" OR "product animation" OR "3d generalist") "remote"',
+]
+
+def build_all_feeds() -> list[str]:
+    feeds = list(DIRECT_RSS_FEEDS)
+    for query in SEARCH_QUERIES:
+        encoded = urllib.parse.quote(query)
+        feeds.append(f"https://news.google.com/rss/search?q={encoded}+when:7d&hl=en-US&gl=US&ceid=US:en")
+    return feeds
 
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 SEEN_FILE = "seen_jobs.json"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ProductJobScout/1.0"
 client = genai.Client()
 
 class JobEvaluation(BaseModel):
@@ -56,7 +88,7 @@ def load_seen() -> set:
 
 def save_seen(seen_ids: set):
     with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen_ids)[-1000:], f, indent=2)  # Keep last 1,000 IDs
+        json.dump(list(seen_ids)[-2000:], f, indent=2)
 
 def evaluate_job(title: str, summary: str) -> JobEvaluation:
     prompt = f"""
@@ -103,10 +135,11 @@ def run():
 
     seen = load_seen()
     new_matches = 0
+    all_feeds = build_all_feeds()
 
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
-        for entry in feed.entries[:15]:
+    for feed_url in all_feeds:
+        feed = feedparser.parse(feed_url, agent=USER_AGENT)
+        for entry in feed.entries[:10]:  # Check 10 newest entries per source
             job_id = entry.get("id") or entry.get("link")
             if not job_id or job_id in seen:
                 continue
@@ -125,7 +158,7 @@ def run():
                 print(f"Error evaluating '{title}': {e}")
 
     save_seen(seen)
-    print(f"Run complete. Posted {new_matches} new job(s).")
+    print(f"Run complete. Checked {len(all_feeds)} sources and posted {new_matches} new job(s).")
 
 if __name__ == "__main__":
     run()
